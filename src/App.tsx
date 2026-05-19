@@ -22,7 +22,8 @@ import {
   Plus,
   LogIn,
   LogOut,
-  Mic
+  Mic,
+  Volume2
 } from 'lucide-react';
 import type { Message, Language, UserStats, LessonContent, LearningLanguage } from './types';
 import { LANGUAGES } from './types';
@@ -175,6 +176,31 @@ function MainApp() {
       });
     }
   }, [profile, currentView, activeLangCode]);
+
+  const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
+
+  const playTTS = async (text: string, langName: string, msgId: string) => {
+    if (playingMsgId) return;
+    setPlayingMsgId(msgId);
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text.substring(0, 300).split('Correction:')[0].trim(), language: langName })
+      });
+      const data = await response.json();
+      if (data.audio) {
+        const audio = new Audio(`data:audio/wav;base64,${data.audio}`);
+        await audio.play();
+        audio.onended = () => setPlayingMsgId(null);
+      } else {
+        setPlayingMsgId(null);
+      }
+    } catch (e) {
+      console.error("TTS error:", e);
+      setPlayingMsgId(null);
+    }
+  };
 
   const activeLang = learningLanguages.find(l => l.code === activeLangCode);
 
@@ -553,9 +579,26 @@ function MainApp() {
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-natural-bg text-natural-dark overflow-hidden">
       {isLoadingLesson && (
-        <div className="fixed inset-0 z-[150] bg-natural-bg/80 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center">
-          <Loader2 className="w-12 h-12 text-natural-green animate-spin mb-4" />
-          <p className="font-serif italic text-xl break-words">{t.loadingUniverse}</p>
+        <div className="fixed inset-0 z-[150] bg-natural-bg/90 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center">
+          <div className="relative mb-8">
+            <Loader2 className="w-16 h-16 text-natural-green animate-spin" />
+            <motion.div 
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ repeat: Infinity, duration: 2, repeatType: 'reverse' }}
+              className="absolute inset-0 bg-natural-green/20 rounded-full blur-2xl"
+            />
+          </div>
+          <h2 className="text-2xl md:text-3xl font-serif italic mb-4 text-natural-dark">{t.loadingUniverse}</h2>
+          <div className="w-64 h-1.5 bg-natural-border rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: "0%" }}
+              animate={{ width: "100%" }}
+              transition={{ duration: 8, ease: "linear" }}
+              className="bg-natural-green h-full"
+            />
+          </div>
+          <p className="mt-4 text-xs font-bold uppercase tracking-widest text-natural-taupe opacity-50">{t.analyzingPotential}</p>
         </div>
       )}
 
@@ -785,12 +828,21 @@ function MainApp() {
                           <div className="whitespace-pre-wrap leading-relaxed text-sm md:text-base break-words">{parseMessage(msg.parts[0].text)}</div>
                         </div>
                         {msg.role === 'model' && (
-                          <button 
-                            onClick={() => setActivePracticeText(msg.parts[0].text.substring(0, 150).split('Correction:')[0].trim())}
-                            className="flex items-center gap-1.5 text-[10px] font-bold text-natural-green hover:opacity-80 transition-all uppercase tracking-widest self-start px-2 truncate"
-                          >
-                            <Mic size={12} /> {t.practicePronunciation}
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              onClick={() => playTTS(msg.parts[0].text, activeLang?.name || 'English', i.toString())}
+                              disabled={!!playingMsgId}
+                              className="flex items-center gap-1.5 text-[10px] font-bold text-natural-green hover:opacity-80 transition-all uppercase tracking-widest self-start px-2 truncate disabled:opacity-30"
+                            >
+                              {playingMsgId === i.toString() ? <Loader2 size={12} className="animate-spin" /> : <Volume2 size={12} />} {t.listen || 'Listen'}
+                            </button>
+                            <button 
+                              onClick={() => setActivePracticeText(msg.parts[0].text.substring(0, 150).split('Correction:')[0].trim())}
+                              className="flex items-center gap-1.5 text-[10px] font-bold text-natural-taupe hover:text-natural-green transition-all uppercase tracking-widest self-start px-2 truncate"
+                            >
+                              <Mic size={12} /> {t.practicePronunciation}
+                            </button>
+                          </div>
                         )}
                       </div>
                     </motion.div>

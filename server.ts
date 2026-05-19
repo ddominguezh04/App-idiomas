@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -22,6 +22,69 @@ const ai = new GoogleGenAI({
 });
 
 // API Routes
+
+// Text-to-Speech Route
+app.post("/api/tts", async (req, res) => {
+  try {
+    const { text, language } = req.body;
+    
+    // Choose voice based on language
+    let voiceName = 'Zephyr'; // Default
+    if (language === 'Spanish') voiceName = 'Kore';
+    if (language === 'French') voiceName = 'Puck';
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-tts-preview",
+      contents: [{ parts: [{ text: `Say clearly: ${text}` }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName },
+          },
+        },
+      },
+    });
+
+    const part = response.candidates?.[0]?.content?.parts?.[0];
+    const base64Audio = part?.inlineData?.data;
+    
+    if (base64Audio) {
+      // The TTS model returns raw PCM (L16, 24kHz, mono). 
+      // We wrap it in a WAV header to make it playable by browser <audio> tags.
+      const pcmBuffer = Buffer.from(base64Audio, 'base64');
+      const wavHeader = Buffer.alloc(44);
+      
+      // RIFF header
+      wavHeader.write('RIFF', 0);
+      wavHeader.writeUInt32LE(36 + pcmBuffer.length, 4);
+      wavHeader.write('WAVE', 8);
+      
+      // fmt sub-chunk
+      wavHeader.write('fmt ', 12);
+      wavHeader.writeUInt32LE(16, 16); // Subchunk1Size (16 for PCM)
+      wavHeader.writeUInt16LE(1, 20);  // AudioFormat (1 for PCM)
+      wavHeader.writeUInt16LE(1, 22);  // NumChannels (1 for mono)
+      wavHeader.writeUInt32LE(24000, 24); // SampleRate (24kHz)
+      wavHeader.writeUInt32LE(24000 * 2, 28); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
+      wavHeader.writeUInt16LE(2, 32);  // BlockAlign (NumChannels * BitsPerSample/8)
+      wavHeader.writeUInt16LE(16, 34); // BitsPerSample (16 bits)
+      
+      // data sub-chunk
+      wavHeader.write('data', 36);
+      wavHeader.writeUInt32LE(pcmBuffer.length, 40);
+      
+      const wavBuffer = Buffer.concat([wavHeader, pcmBuffer]);
+      res.json({ audio: wavBuffer.toString('base64') });
+    } else {
+      throw new Error("No audio generated");
+    }
+  } catch (error: any) {
+    console.error("TTS Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, history, language } = req.body;
@@ -150,7 +213,7 @@ app.post("/api/pronunciation/analyze", async (req, res) => {
     const { audio, text, language, nativeLanguage } = req.body;
     
     const result = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3-flash-preview",
       contents: [
         {
           role: "user",

@@ -81,7 +81,8 @@ export const TRANSLATIONS: Record<string, any> = {
     noAccount: "If you are not registered, do it here",
     googleLogin: "Continue with Google",
     errorAuth: "Authentication error",
-    fillAllFields: "Please fill in all fields"
+    fillAllFields: "Please fill in all fields",
+    listen: "Listen"
   },
   Spanish: {
     welcome: "Bienvenido",
@@ -164,7 +165,8 @@ export const TRANSLATIONS: Record<string, any> = {
     noAccount: "Si no estás registrado, hazlo aquí",
     googleLogin: "Continuar con Google",
     errorAuth: "Error de autenticación",
-    fillAllFields: "Por favor, rellena todos los campos"
+    fillAllFields: "Por favor, rellena todos los campos",
+    listen: "Escuchar"
   },
   French: {
     welcome: "Bienvenue",
@@ -247,7 +249,8 @@ export const TRANSLATIONS: Record<string, any> = {
     noAccount: "Si vous n'êtes pas inscrit, faites-le ici",
     googleLogin: "Continuer avec Google",
     errorAuth: "Erreur d'authentification",
-    fillAllFields: "Veuillez remplir tous les champs"
+    fillAllFields: "Veuillez remplir tous les champs",
+    listen: "Écouter"
   }
 };
 

@@ -30,6 +30,33 @@ export default function PronunciationPractice({ text, language, nativeLanguage, 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
+  const [isPlayingTarget, setIsPlayingTarget] = useState(false);
+  
+  const playTargetAudio = async () => {
+    if (isPlayingTarget) return;
+    setIsPlayingTarget(true);
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language })
+      });
+      const data = await response.json();
+      if (data.audio) {
+        const audio = new Audio(`data:audio/wav;base64,${data.audio}`);
+        audio.play();
+        audio.onended = () => setIsPlayingTarget(false);
+      }
+    } catch (err) {
+      console.error('TTS error:', err);
+      // Fallback to basic speech synthesis if API fails
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = language === 'Spanish' ? 'es-ES' : language === 'French' ? 'fr-FR' : 'en-US';
+      window.speechSynthesis.speak(utterance);
+      setIsPlayingTarget(false);
+    }
+  };
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -135,14 +162,11 @@ export default function PronunciationPractice({ text, language, nativeLanguage, 
               {text}
             </p>
             <button 
-              onClick={() => {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = language === 'Spanish' ? 'es-ES' : language === 'French' ? 'fr-FR' : 'en-US'; // Basic mapping
-                window.speechSynthesis.speak(utterance);
-              }}
-              className="absolute top-6 right-6 p-2 bg-white rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={playTargetAudio}
+              disabled={isPlayingTarget}
+              className="absolute top-6 right-6 p-2 bg-white rounded-full shadow-sm opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
             >
-              <Play size={16} fill="currentColor" />
+              {isPlayingTarget ? <Loader2 size={16} className="animate-spin text-natural-green" /> : <Play size={16} fill="currentColor" />}
             </button>
           </div>
 

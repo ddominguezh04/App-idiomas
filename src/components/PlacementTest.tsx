@@ -81,8 +81,24 @@ export default function PlacementTest({ language, nativeLanguage, onComplete }: 
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-center overflow-hidden">
-        <Loader2 className="w-12 h-12 text-natural-green animate-spin mb-4 shrink-0" />
+        <div className="relative mb-8">
+          <Loader2 className="w-16 h-16 text-natural-green animate-spin" />
+          <motion.div 
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ repeat: Infinity, duration: 2, repeatType: 'reverse' }}
+            className="absolute inset-0 bg-natural-green/20 rounded-full blur-2xl"
+          />
+        </div>
         <p className="font-serif italic text-xl text-natural-dark break-words">{t.loadingUniverse}</p>
+        <div className="w-48 h-1 bg-natural-border rounded-full overflow-hidden mt-6">
+          <motion.div 
+            initial={{ width: "0%" }}
+            animate={{ width: "100%" }}
+            transition={{ duration: 6, ease: "linear" }}
+            className="bg-natural-green h-full"
+          />
+        </div>
       </div>
     );
   }
