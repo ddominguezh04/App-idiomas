@@ -32,10 +32,67 @@ import PronunciationPractice from './components/PronunciationPractice';
 import Auth from './components/Auth';
 import { FirebaseProvider, useFirebase } from './components/FirebaseProvider';
 import { auth, db } from './lib/firebase';
-import { doc, setDoc, updateDoc, collection, getDocs, onSnapshot, query, setDoc as setFirestoreDoc } from 'firebase/firestore';
+import { 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  collection, 
+  getDocs, 
+  onSnapshot, 
+  query, 
+  setDoc as setFirestoreDoc,
+  FirestoreError 
+} from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 
 import { getTranslation } from './lib/translations';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 function MainApp() {
   const { user, profile, loading, refreshProfile } = useFirebase();
@@ -50,6 +107,7 @@ function MainApp() {
   const [localStats, setLocalStats] = useState<UserStats | null>(null);
   const [learningLanguages, setLearningLanguages] = useState<LearningLanguage[]>([]);
   const [activeLangCode, setActiveLangCode] = useState<string>('');
+  const [vocabulary, setVocabulary] = useState<{ word: string; translation: string; learnedDate: string }[]>([]);
 
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -64,7 +122,8 @@ function MainApp() {
   useEffect(() => {
     if (profile) {
       setLocalStats(profile);
-      const q = query(collection(db, 'users', profile.uid, 'learningLanguages'));
+      const path = `users/${profile.uid}/learningLanguages`;
+      const q = query(collection(db, path));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const langs = snapshot.docs.map(doc => doc.data() as LearningLanguage);
         setLearningLanguages(langs);
@@ -72,14 +131,50 @@ function MainApp() {
           const sorted = [...langs].sort((a, b) => b.xp - a.xp);
           setActiveLangCode(sorted[0].code);
         }
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, path);
       });
-      return unsubscribe;
+
+      const vocabPath = `users/${profile.uid}/vocabulary`;
+      const vocabUnsubscribe = onSnapshot(query(collection(db, vocabPath)), (snapshot) => {
+        const v = snapshot.docs.map(doc => doc.data() as any);
+        setVocabulary(v);
+      });
+
+      return () => {
+        unsubscribe();
+        vocabUnsubscribe();
+      };
     }
   }, [profile]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  }, [chatMessages, isTyping]);
+
+  useEffect(() => {
+    if (profile && currentView === 'chat' && activeLangCode) {
+      const chatPath = `users/${profile.uid}/chat_history`;
+      const q = query(
+        collection(db, chatPath),
+        // We could filter by languageCode here if we want separate histories
+      );
+      
+      getDocs(q).then(snapshot => {
+        const msgs = snapshot.docs
+          .map(doc => doc.data())
+          .filter(m => m.languageCode === activeLangCode)
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          .map(m => ({ role: m.role, parts: m.parts }));
+        
+        if (msgs.length > 0) {
+          setChatMessages(msgs as Message[]);
+        } else {
+          setChatMessages([{ role: 'model', parts: [{ text: `${activeLang?.flag || '👋'} I'm your native ${activeLang?.name} tutor. How can I help you practice today?` }] }]);
+        }
+      });
+    }
+  }, [profile, currentView, activeLangCode]);
 
   const activeLang = learningLanguages.find(l => l.code === activeLangCode);
 
@@ -87,9 +182,22 @@ function MainApp() {
     setIsSidebarOpen(false); // Close sidebar on view change
   }, [currentView, activeLangCode]);
 
+  // Scroll lock when sidebar is open
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isSidebarOpen]);
+
   const handleCreateProfile = async (nativeLang: string) => {
     if (!user || isLoadingOnboarding) return;
     setIsLoadingOnboarding(true);
+    const path = `users/${user.uid}`;
     try {
       const profileData = {
         id: user.uid,
@@ -103,7 +211,7 @@ function MainApp() {
       await refreshProfile();
       setSearchQuery('');
     } catch (error) {
-      console.error('Error creating profile:', error);
+      handleFirestoreError(error, OperationType.WRITE, path);
     } finally {
       setIsLoadingOnboarding(false);
     }
@@ -112,6 +220,7 @@ function MainApp() {
   const handleAddLanguage = async (lang: Language, level: string) => {
     if (!user || isLoadingOnboarding) return;
     setIsLoadingOnboarding(true);
+    const path = `users/${user.uid}/learningLanguages/${lang.code}`;
     try {
       const newLang: LearningLanguage = {
         code: lang.code,
@@ -127,7 +236,7 @@ function MainApp() {
       setCurrentView('dashboard');
       setSearchQuery('');
     } catch (error) {
-       console.error('Error adding language:', error);
+       handleFirestoreError(error, OperationType.WRITE, path);
     } finally {
       setIsLoadingOnboarding(false);
     }
@@ -135,12 +244,17 @@ function MainApp() {
 
   const updateProgress = async (xpGain: number, lessonComplete: boolean = false) => {
     if (!user || !activeLang) return;
-    const langRef = doc(db, 'users', user.uid, 'learningLanguages', activeLang.code);
-    await updateDoc(langRef, {
-      xp: activeLang.xp + xpGain,
-      lessonsDone: lessonComplete ? activeLang.lessonsDone + 1 : activeLang.lessonsDone,
-      lastAccessed: new Date().toISOString()
-    });
+    const path = `users/${user.uid}/learningLanguages/${activeLang.code}`;
+    const langRef = doc(db, path);
+    try {
+      await updateDoc(langRef, {
+        xp: activeLang.xp + xpGain,
+        lessonsDone: lessonComplete ? activeLang.lessonsDone + 1 : activeLang.lessonsDone,
+        lastAccessed: new Date().toISOString()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
   };
 
   const handleStartLesson = async (topic: string) => {
@@ -180,6 +294,20 @@ function MainApp() {
       parts: [{ text: inputMessage }]
     };
 
+    const chatPath = `users/${profile.uid}/chat_history`;
+    const msgId = new Date().getTime().toString() + '_user';
+    
+    // Save user message to Firestore
+    try {
+      await setDoc(doc(db, chatPath, msgId), {
+        ...newUserMessage,
+        createdAt: new Date().toISOString(),
+        languageCode: activeLang.code
+      });
+    } catch (e) {
+      console.error("Error saving chat:", e);
+    }
+
     setChatMessages(prev => [...prev, newUserMessage]);
     setInputMessage('');
     setIsTyping(true);
@@ -201,8 +329,40 @@ function MainApp() {
         role: 'model',
         parts: [{ text: data.text }]
       };
+
+      // Save model message to Firestore
+      const modelMsgId = new Date().getTime().toString() + '_model';
+      try {
+        await setDoc(doc(db, chatPath, modelMsgId), {
+          ...modelMessage,
+          createdAt: new Date().toISOString(),
+          languageCode: activeLang.code
+        });
+      } catch (e) {
+        console.error("Error saving model chat:", e);
+      }
+
       setChatMessages(prev => [...prev, modelMessage]);
       updateProgress(15);
+      
+      // Auto-save vocabulary if "Correction:" is present
+      if (data.text.includes('Correction:')) {
+        const parts = data.text.split(/Correction:/i);
+        const feedback = parts[1].trim();
+        const vocabMatch = feedback.match(/"([^"]+)"/g); // Simple heuristic to find quoted words
+        if (vocabMatch && vocabMatch.length >= 2) {
+          const word = vocabMatch[0].replace(/"/g, '');
+          const translation = vocabMatch[1].replace(/"/g, '');
+          const vocabPath = `users/${profile.uid}/vocabulary`;
+          await setDoc(doc(db, vocabPath, word.toLowerCase().replace(/\s+/g, '_')), {
+            word,
+            translation,
+            learnedDate: new Date().toISOString(),
+            languageCode: activeLang.code
+          });
+        }
+      }
+
     } catch (error) {
       console.error('Chat error:', error);
     } finally {
@@ -451,21 +611,21 @@ function MainApp() {
 
       {/* Sidebar */}
       <nav className={`
-        fixed md:relative inset-y-0 left-0 z-50
-        w-full md:w-80 bg-natural-sidebar border-r border-natural-border 
-        flex flex-col p-8 transition-transform duration-300 transform
+        fixed md:relative top-[73px] md:top-0 left-0 z-50
+        w-[280px] md:w-80 bg-natural-sidebar border-r border-natural-border 
+        flex flex-col p-5 md:p-8 transition-transform duration-300 transform
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-        h-screen overflow-y-auto
+        h-[calc(100vh-73px)] md:h-screen overflow-y-auto shadow-2xl md:shadow-none
       `}>
-        <div className="hidden md:flex items-center gap-4 mb-12">
+        <div className="hidden md:flex items-center gap-4 mb-10">
           <div className="w-11 h-11 bg-natural-green rounded-[14px] flex items-center justify-center text-white shadow-xl shadow-natural-green/10 shrink-0">
             <Sparkles size={22} />
           </div>
           <span className="text-2xl font-serif italic text-natural-dark">LinguaFlow</span>
         </div>
         
-        <div className="space-y-1.5 mb-12">
-          <p className="text-[10px] uppercase tracking-[0.3em] font-black opacity-20 mb-6 px-5">{t.menu}</p>
+        <div className="space-y-1 mb-6">
+          <p className="text-[10px] uppercase tracking-[0.3em] font-black opacity-20 mb-3 px-4">{t.menu}</p>
           <SidebarNavButton t={t} active={currentView === 'dashboard'} icon={<Home size={20} />} label={t.dashboard} onClick={() => { setCurrentView('dashboard'); setIsSidebarOpen(false); }} />
           <SidebarNavButton t={t} active={currentView === 'lessons'} icon={<BookOpen size={20} />} label={t.myCourses} onClick={() => { setCurrentView('lessons'); setIsSidebarOpen(false); }} />
           <SidebarNavButton t={t} active={currentView === 'chat'} icon={<MessageSquare size={20} />} label={t.aiPractice} onClick={() => {
@@ -478,30 +638,30 @@ function MainApp() {
           <SidebarNavButton t={t} active={currentView === 'vocabulary'} icon={<TrendingUp size={20} />} label={t.statsProgress} onClick={() => { setCurrentView('vocabulary'); setIsSidebarOpen(false); }} />
         </div>
 
-        <div className="space-y-6 mb-12">
-           <div className="flex items-center justify-between px-5">
+        <div className="space-y-3 mb-6">
+           <div className="flex items-center justify-between px-4">
              <p className="text-[10px] uppercase tracking-[0.3em] font-black opacity-20 truncate">{t.myLanguages}</p>
              <button onClick={() => {
                setCurrentView('placement');
                setIsSidebarOpen(false);
-             }} className="p-1.5 hover:bg-natural-green/10 text-natural-green rounded-lg transition-colors shrink-0">
+             }} className="p-1 hover:bg-natural-green/10 text-natural-green rounded-lg transition-colors shrink-0">
                <Plus size={16} />
              </button>
            </div>
-           <div className="space-y-2 px-1">
+           <div className="space-y-1.5 px-0.5">
              {learningLanguages.map(lang => (
                <button 
-                key={lang.code}
-                onClick={() => {
-                  setActiveLangCode(lang.code);
-                  setIsSidebarOpen(false);
-                }}
-                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-[22px] transition-all duration-300 group overflow-hidden ${activeLangCode === lang.code ? 'bg-white shadow-lg shadow-natural-green/5 border border-natural-border text-natural-dark translate-x-1' : 'text-natural-taupe hover:text-natural-dark hover:bg-natural-sidebar/50'}`}
+                 key={lang.code}
+                 onClick={() => {
+                   setActiveLangCode(lang.code);
+                   setIsSidebarOpen(false);
+                 }}
+                 className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-[20px] transition-all duration-300 group overflow-hidden ${activeLangCode === lang.code ? 'bg-white shadow-lg shadow-natural-green/5 border border-natural-border text-natural-dark translate-x-0.5' : 'text-natural-taupe hover:text-natural-dark hover:bg-natural-sidebar/50'}`}
                >
-                 <span className="text-2xl shrink-0 transition-transform group-hover:scale-110">{lang.flag}</span>
+                 <span className="text-xl shrink-0 transition-transform group-hover:scale-110">{lang.flag}</span>
                  <div className="text-left flex-1 min-w-0">
                     <p className={`text-xs font-bold leading-tight mb-0.5 truncate ${activeLangCode === lang.code ? 'text-natural-green' : ''}`}>{lang.name}</p>
-                    <p className="text-[10px] opacity-40 uppercase tracking-widest font-bold truncate">{t.level} {lang.level}</p>
+                    <p className="text-[9px] opacity-40 uppercase tracking-widest font-bold truncate">{t.level} {lang.level}</p>
                  </div>
                  {activeLangCode === lang.code && <motion.div layoutId="lang-dot" className="w-1.5 h-1.5 bg-natural-green rounded-full shadow-[0_0_8px_rgba(46,125,50,0.5)] shrink-0" />}
                </button>
@@ -509,17 +669,17 @@ function MainApp() {
            </div>
         </div>
         
-        <div className="mt-auto pt-8">
-          <div className="flex items-center gap-4 p-5 bg-white border border-natural-border rounded-[28px] shadow-sm overflow-hidden">
-             <div className="w-11 h-11 rounded-[16px] bg-natural-sidebar border border-natural-border flex items-center justify-center font-black text-natural-taupe shrink-0">
+        <div className="mt-auto pt-4">
+          <div className="flex items-center gap-3.5 p-4 bg-white border border-natural-border rounded-[24px] shadow-sm overflow-hidden">
+             <div className="w-10 h-10 rounded-[14px] bg-natural-sidebar border border-natural-border flex items-center justify-center font-black text-natural-taupe shrink-0 text-xs">
                {user?.displayName ? user.displayName[0].toUpperCase() : 'U'}
              </div>
              <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-natural-dark truncate">{user?.displayName || 'User'}</p>
-                <p className="text-[10px] uppercase tracking-widest font-black opacity-30 truncate">{t.proMember}</p>
+                <p className="text-[9px] uppercase tracking-widest font-black opacity-30 truncate">{t.proMember}</p>
              </div>
-             <button onClick={() => signOut(auth)} className="p-2.5 hover:bg-red-50 text-red-500 rounded-xl transition-all active:scale-90 shrink-0">
-               <LogOut size={18} />
+             <button onClick={() => signOut(auth)} className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-all active:scale-90 shrink-0">
+               <LogOut size={16} />
              </button>
           </div>
         </div>
@@ -728,6 +888,32 @@ function MainApp() {
                         <p className="text-3xl md:text-4xl font-bold truncate">{learningLanguages.reduce((sum, l) => sum + l.xp, 0)}</p>
                         <p className="text-[10px] uppercase tracking-widest font-bold opacity-40 truncate">{t.totalXP}</p>
                       </div>
+
+                      {vocabulary.length > 0 && (
+                        <div className="bg-white p-6 md:p-8 rounded-[32px] md:rounded-[40px] border border-natural-border shadow-sm overflow-hidden text-left">
+                          <h3 className="font-serif italic text-lg mb-4 flex items-center gap-2 text-natural-dark">
+                            <Sparkles size={18} className="text-natural-green" /> Learned Vocabulary
+                          </h3>
+                          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                            {vocabulary
+                              .filter((v: any) => v.languageCode === activeLangCode)
+                              .sort((a: any, b: any) => new Date(b.learnedDate).getTime() - new Date(a.learnedDate).getTime())
+                              .map((v: any, i: number) => (
+                                <div key={i} className="flex justify-between items-center p-3 bg-natural-sidebar rounded-xl border border-natural-border shadow-sm group hover:scale-[1.02] transition-transform">
+                                  <div>
+                                    <p className="font-bold text-natural-dark text-sm">{v.word}</p>
+                                    <p className="text-[10px] text-natural-taupe uppercase tracking-widest font-black opacity-50">{v.translation}</p>
+                                  </div>
+                                  <div className="text-[8px] bg-white px-2 py-1 rounded-full opacity-40 group-hover:opacity-100 transition-opacity">
+                                     {new Date(v.learnedDate).toLocaleDateString()}
+                                  </div>
+                                </div>
+                              ))
+                            }
+                          </div>
+                        </div>
+                      )}
+
                       <div className="bg-white p-6 md:p-8 rounded-[32px] md:rounded-[40px] border border-natural-border shadow-sm text-center overflow-hidden">
                         <CheckCircle2 size={48} className="text-natural-green mx-auto mb-4 shrink-0" />
                         <p className="text-3xl md:text-4xl font-bold truncate">{learningLanguages.reduce((sum, l) => sum + l.lessonsDone, 0)}</p>
@@ -756,7 +942,7 @@ function SidebarNavButton({ active, icon, label, onClick }: { active: boolean, i
   return (
     <button 
       onClick={onClick}
-      className={`w-full flex items-center gap-4 px-5 py-4 rounded-[28px] transition-all duration-300 group overflow-hidden ${active ? 'bg-white shadow-xl shadow-natural-green/5 border border-natural-border text-natural-dark translate-x-1' : 'text-natural-taupe hover:text-natural-dark hover:bg-natural-sidebar/50'}`}
+      className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-[20px] transition-all duration-300 group overflow-hidden ${active ? 'bg-white shadow-xl shadow-natural-green/5 border border-natural-border text-natural-dark translate-x-0.5' : 'text-natural-taupe hover:text-natural-dark hover:bg-natural-sidebar/50'}`}
     >
       <span className={`shrink-0 transition-transform duration-300 ${active ? 'text-natural-green scale-110' : 'group-hover:scale-110'}`}>{icon}</span>
       <span className="text-sm font-bold tracking-tight truncate">{label}</span>

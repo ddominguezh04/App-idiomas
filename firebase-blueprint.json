@@ -2,43 +2,43 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "App user profile",
+      "description": "User profile data",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "email": { "type": "string" },
-        "name": { "type": "string" },
-        "nativeLanguage": { "type": "string" },
-        "createdAt": { "type": "string" }
+        "id": { "type": "string", "description": "The user's unique identifier (matches UID)" },
+        "uid": { "type": "string", "description": "The user's unique identifier" },
+        "nativeLanguage": { "type": "string", "description": "The user's native language" },
+        "email": { "type": "string", "description": "User's email address" },
+        "name": { "type": "string", "description": "User's display name" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
-      "required": ["id", "email", "nativeLanguage"]
+      "required": ["id", "uid", "nativeLanguage", "email", "name", "createdAt"]
     },
     "LearningLanguage": {
       "title": "Learning Language",
-      "description": "Progress for a specific language being learned by a user",
+      "description": "Details about a language the user is learning",
       "type": "object",
       "properties": {
-        "code": { "type": "string" },
-        "name": { "type": "string" },
-        "flag": { "type": "string" },
-        "level": { "type": "string", "enum": ["A1", "A2", "B1", "B2", "C1", "C2"] },
-        "xp": { "type": "number" },
-        "streak": { "type": "number" },
-        "lessonsDone": { "type": "number" },
-        "completedLessons": { "type": "array" },
-        "lastAccessed": { "type": "string" }
+        "code": { "type": "string", "description": "Language code (e.g., Spanish)" },
+        "name": { "type": "string", "description": "Display name of the language" },
+        "flag": { "type": "string", "description": "Emoji flag for the language" },
+        "level": { "type": "string", "enum": ["A1", "A2", "B1", "B2", "C1", "C2"], "description": "CEFR level" },
+        "xp": { "type": "number", "description": "Total experience points gained" },
+        "streak": { "type": "number", "description": "Current daily streak" },
+        "lessonsDone": { "type": "number", "description": "Total lessons completed" },
+        "lastAccessed": { "type": "string", "format": "date-time", "description": "Last time the user practiced this language" }
       },
-      "required": ["code", "level", "xp"]
+      "required": ["code", "name", "flag", "level", "xp", "streak", "lessonsDone"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "User profile data"
+      "description": "Individual user profiles"
     },
-    "/users/{userId}/learningLanguages/{languageCode}": {
+    "/users/{userId}/learningLanguages/{langCode}": {
       "schema": "LearningLanguage",
-      "description": "Languages being learned by the user"
+      "description": "Languages being learned by a specific user"
     }
   }
 }

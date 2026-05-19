@@ -1,11 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default Deny
+    // 1. Global Safety Net
     match /{document=**} {
       allow read, write: if false;
     }
 
+    // --- Helper Functions ---
     function isSignedIn() {
       return request.auth != null;
     }
@@ -22,39 +23,70 @@ service cloud.firestore {
       return request.resource.data;
     }
 
-    // --- User Profiles ---
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'uid', 'nativeLanguage', 'email', 'name', 'createdAt']) &&
+             data.id == request.auth.uid &&
+             data.uid == request.auth.uid &&
+             data.nativeLanguage is string &&
+             data.email is string &&
+             data.name is string &&
+             data.createdAt is string;
+    }
+
+    function isValidLearningLanguage(data) {
+      return data.keys().hasAll(['code', 'name', 'flag', 'level', 'xp', 'streak', 'lessonsDone']) &&
+             data.code is string &&
+             data.name is string &&
+             data.flag is string &&
+             data.level in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] &&
+             data.xp is number &&
+             data.streak is number &&
+             data.lessonsDone is number;
+    }
+
+    function isValidVocabulary(data) {
+      return data.keys().hasAll(['word', 'translation', 'learnedDate']) &&
+             data.word is string &&
+             data.translation is string &&
+             data.learnedDate is string;
+    }
+
+    function isValidChatMessage(data) {
+       return data.keys().hasAll(['role', 'parts', 'createdAt']) &&
+              data.role in ['user', 'model'] &&
+              data.parts is list &&
+              data.createdAt is string;
+    }
+
+    // --- Collection Routes ---
+    
     match /users/{userId} {
       allow get: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidUser(incoming()) && (
-        incoming().diff(resource.data).affectedKeys().hasOnly(['name', 'nativeLanguage'])
-      );
-
-      function isValidUser(data) {
-        return data.keys().hasAll(['id', 'email', 'nativeLanguage']) &&
-               data.id == request.auth.uid &&
-               data.email is string &&
-               data.nativeLanguage is string &&
-               data.nativeLanguage.size() <= 50;
+      allow update: if isOwner(userId) && isValidUser(incoming());
+      
+      match /learningLanguages/{langCode} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(langCode) && isValidLearningLanguage(incoming());
+        allow update: if isOwner(userId) && isValidLearningLanguage(incoming());
+        allow delete: if isOwner(userId);
       }
 
-      // --- Learning Languages ---
-      match /learningLanguages/{languageCode} {
-        allow list: if isOwner(userId);
-        allow get: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidLearningLanguage(incoming());
-        allow update: if isOwner(userId) && isValidLearningLanguage(incoming()) && (
-          incoming().diff(resource.data).affectedKeys().hasOnly(['level', 'xp', 'streak', 'lessonsDone', 'completedLessons', 'lastAccessed'])
-        );
+      match /vocabulary/{wordId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidVocabulary(incoming());
+        allow update: if isOwner(userId) && isValidVocabulary(incoming());
         allow delete: if isOwner(userId);
+      }
 
-        function isValidLearningLanguage(data) {
-          return data.keys().hasAll(['code', 'level', 'xp']) &&
-                 data.code == languageCode &&
-                 data.level in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] &&
-                 data.xp is number &&
-                 data.xp >= 0;
-        }
+      match /chat_history/{msgId} {
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidChatMessage(incoming());
       }
     }
   }

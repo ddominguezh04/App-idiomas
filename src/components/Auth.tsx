@@ -26,9 +26,13 @@ export default function Auth() {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login Error:", error);
-      setError(t.errorAuth);
+    } catch (err: any) {
+      console.error("Login Error:", err);
+      if (err.code === 'auth/operation-not-allowed') {
+        setError("El método de inicio de sesión con Google no está habilitado en Firebase. Por favor, actívalo en la consola de Firebase -> Authentication -> Sign-in method.");
+      } else {
+        setError(t.errorAuth);
+      }
     }
   };
 
@@ -52,7 +56,11 @@ export default function Auth() {
       }
     } catch (err: any) {
       console.error("Auth Error:", err);
-      setError(err.message || t.errorAuth);
+      if (err.code === 'auth/operation-not-allowed') {
+        setError("El método de inicio de sesión con Email/Password no está habilitado en Firebase. Por favor, actívalo en la consola de Firebase -> Authentication -> Sign-in method.");
+      } else {
+        setError(err.message || t.errorAuth);
+      }
     } finally {
       setIsLoading(false);
     }
