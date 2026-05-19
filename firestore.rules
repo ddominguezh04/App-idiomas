@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // --- User Profiles ---
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && (
+        incoming().diff(resource.data).affectedKeys().hasOnly(['name', 'nativeLanguage'])
+      );
+
+      function isValidUser(data) {
+        return data.keys().hasAll(['id', 'email', 'nativeLanguage']) &&
+               data.id == request.auth.uid &&
+               data.email is string &&
+               data.nativeLanguage is string &&
+               data.nativeLanguage.size() <= 50;
+      }
+
+      // --- Learning Languages ---
+      match /learningLanguages/{languageCode} {
+        allow list: if isOwner(userId);
+        allow get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidLearningLanguage(incoming());
+        allow update: if isOwner(userId) && isValidLearningLanguage(incoming()) && (
+          incoming().diff(resource.data).affectedKeys().hasOnly(['level', 'xp', 'streak', 'lessonsDone', 'completedLessons', 'lastAccessed'])
+        );
+        allow delete: if isOwner(userId);
+
+        function isValidLearningLanguage(data) {
+          return data.keys().hasAll(['code', 'level', 'xp']) &&
+                 data.code == languageCode &&
+                 data.level in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] &&
+                 data.xp is number &&
+                 data.xp >= 0;
+        }
+      }
+    }
+  }
+}

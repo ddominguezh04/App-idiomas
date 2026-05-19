@@ -1,0 +1,6 @@
+{
+  "name": "LinguFlow",
+  "description": "An AI-powered language learning platform with personalized lessons and interactive conversation practice.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

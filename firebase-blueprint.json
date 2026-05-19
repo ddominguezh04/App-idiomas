@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "App user profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "nativeLanguage": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "nativeLanguage"]
+    },
+    "LearningLanguage": {
+      "title": "Learning Language",
+      "description": "Progress for a specific language being learned by a user",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "flag": { "type": "string" },
+        "level": { "type": "string", "enum": ["A1", "A2", "B1", "B2", "C1", "C2"] },
+        "xp": { "type": "number" },
+        "streak": { "type": "number" },
+        "lessonsDone": { "type": "number" },
+        "completedLessons": { "type": "array" },
+        "lastAccessed": { "type": "string" }
+      },
+      "required": ["code", "level", "xp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/users/{userId}/learningLanguages/{languageCode}": {
+      "schema": "LearningLanguage",
+      "description": "Languages being learned by the user"
+    }
+  }
+}
